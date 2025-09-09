@@ -58,9 +58,9 @@ client = PublicDataClient(HttpClient(rate_limit_per_second=1))
 resp = client.get_series("CUUR0000SA0", startyear="2023", endyear="2023")
 print(resp["status"], len(resp["Results"]["series"][0]["data"]))
 
-# List surveys
-surveys = client.list_surveys()
-print(surveys["status"], len(surveys["Results"].get("surveys", [])))
+# List surveys (helper returns a list)
+surveys = client.list_surveys_list()
+print(len(surveys), surveys[0]["survey_abbreviation"] if surveys else None)
 ```
 
 ### Multiple series with options

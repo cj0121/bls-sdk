@@ -49,3 +49,8 @@ class PublicDataClient:
 
 	def get_survey(self, survey_abbr: str) -> Dict[str, Any]:
 		return self.http.get_json(f"{PUBLIC_API_SURVEYS_ENDPOINT}/{survey_abbr}")
+
+	def list_surveys_list(self) -> List[Dict[str, Any]]:
+		resp = self.list_surveys()
+		results = resp.get("Results", {})
+		return list(results.get("survey", []))
