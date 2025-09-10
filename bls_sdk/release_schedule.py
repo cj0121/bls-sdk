@@ -62,12 +62,14 @@ def _extract_rows_with_selenium(driver: webdriver.Chrome) -> List[Dict[str, str]
 	rows: List[Dict[str, str]] = []
 
 	def norm(s: str) -> str:
-		return " ".join((s or "").split())
+		# Normalize whitespace and NBSPs
+		return " ".join((s or "").replace("\xa0", " ").split())
 
 	weekday = r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
 	month = r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
 	date_re = re.compile(rf"^{weekday},\s+{month}\s+\d{{1,2}},\s+\d{{4}}$", re.I)
-	time_re = re.compile(r"^\d{1,2}:\d{2}\s*(?:AM|PM)$", re.I)
+	# Accept 'AM', 'PM', 'am', 'pm', and 'a.m.'/'p.m.' variants
+	time_re = re.compile(r"^\d{1,2}:\d{2}\s*(?:AM|PM|A\.M\.|P\.M\.|am|pm|a\.m\.|p\.m\.)$", re.I)
 
 	# Iterate all tables; inside each table, locate the header row, then scan remaining rows
 	for table in soup.find_all("table"):
@@ -136,14 +138,17 @@ def scrape_archived_schedule(years: Iterable[int], output: str = "dataframe") ->
 			# Extract table rows
 			record_rows = _extract_rows_with_selenium(driver)
 			for r in record_rows:
-				title, p_year, p_month, p_quarter = _parse_release_text(r["release_raw"])
+				title, p_year, p_month, p_quarter, notes = _parse_release_text(r["release_raw"])
+				date_iso = _parse_date_iso(r["date_raw"]) or r["date_raw"].strip()
+				time_24h = _normalize_time_to_24h(r["time"]) or r["time"].strip()
 				records.append({
-					"date": r["date_raw"],
-					"time": r["time"],
+					"date": date_iso,
+					"time": time_24h,
 					"release_title": title,
 					"period_year": p_year,
 					"period_month": p_month,
 					"period_quarter": p_quarter,
+					"notes": notes,
 					"source_year_page": y_int,
 					"year_page_url": driver.current_url,
 				})
@@ -153,22 +158,28 @@ def scrape_archived_schedule(years: Iterable[int], output: str = "dataframe") ->
 	if output == "json":
 		return records
 	import pandas as pd  # type: ignore
-	return pd.DataFrame.from_records(records, columns=[
+	df = pd.DataFrame.from_records(records, columns=[
 		"date",
 		"time",
 		"release_title",
 		"period_year",
 		"period_month",
 		"period_quarter",
+		"notes",
 		"source_year_page",
 		"year_page_url",
 	])
+	# Normalize dtypes for period columns
+	for col in ("period_year", "period_month", "period_quarter"):
+		if col in df.columns:
+			df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+	return df
 
 
 __all__ = ["scrape_archived_schedule"]
 
 
-def _parse_release_text(release_text: str) -> (str, Union[int, None], Union[int, None], Union[int, None]):
+def _parse_release_text(release_text: str) -> (str, Union[int, None], Union[int, None], Union[int, None], Union[str, None]):
 	"""Split release into clean title and period components.
 
 	Rules handled:
@@ -182,34 +193,82 @@ def _parse_release_text(release_text: str) -> (str, Union[int, None], Union[int,
 	s = " ".join((release_text or "").split())
 	parts = re.split(r"\s+for\s+", s, maxsplit=1, flags=re.I)
 	title_raw = parts[0]
-	# Strip frequency or revision tags at the end of title
-	title = re.sub(r"\s*\((?:Monthly|Annual|Biennial|P|R)\)\s*$", "", title_raw, flags=re.I)
+	# Capture one or more trailing parenthetical notes e.g. '(Monthly) (P)' and strip parentheses
+	notes = None
+	m_multi = re.search(r"(\s*\([^)]+\)\s*)+$", title_raw)
+	if m_multi:
+		raw_notes = m_multi.group(0)
+		inner = re.findall(r"\(([^)]+)\)", raw_notes)
+		notes = ", ".join([n.strip() for n in inner if n.strip()]) or None
+		title = title_raw[:m_multi.start()].strip()
+	else:
+		title = title_raw
 	period_year = None
 	period_month = None
 	period_quarter = None
 	if len(parts) > 1:
 		period_str = parts[1]
+		# Handle edge case like 'for Biennial' (no year provided)
+		ps_clean = " ".join(period_str.split()).strip().rstrip('.')
+		if ps_clean.lower() in {"annual", "biennial"}:
+			if not notes:
+				notes = ps_clean.title()
+			return title, period_year, period_month, period_quarter, notes
 		# Quarter
 		m_q = re.search(r"(First|Second|Third|Fourth)\s+Quarter\s+(\d{4})", period_str, re.I)
 		if m_q:
 			period_quarter = _QUARTER_WORD_TO_NUM[m_q.group(1).lower()]
 			period_year = int(m_q.group(2))
-			return title, period_year, period_month, period_quarter
+			return title, period_year, period_month, period_quarter, notes
 		# Month
 		m_m = re.search(r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})", period_str, re.I)
 		if m_m:
 			period_month = _MONTH_TO_NUM[m_m.group(1).lower()]
 			period_year = int(m_m.group(2))
-			return title, period_year, period_month, period_quarter
+			return title, period_year, period_month, period_quarter, notes
 		# Annual/Biennial
 		m_a = re.search(r"(Annual|Biennial)\s+(\d{4})", period_str, re.I)
 		if m_a:
 			period_year = int(m_a.group(2))
-			return title, period_year, period_month, period_quarter
-		# General fallback: first year
-		m_y = re.search(r"\b(\d{4})\b", period_str)
+			# If notes not already set from title, use Annual/Biennial from period
+			if not notes:
+				notes = m_a.group(1).title()
+			return title, period_year, period_month, period_quarter, notes
+		# General fallback: year or year range like 2021-2023 (pick the rightmost year)
+		m_y = re.search(r"\b(\d{4})(?:\s*-\s*(\d{4}))?\b", period_str)
 		if m_y:
-			period_year = int(m_y.group(1))
-	return title, period_year, period_month, period_quarter
+			period_year = int(m_y.group(2) or m_y.group(1))
+	return title, period_year, period_month, period_quarter, notes
+
+
+def _parse_date_iso(date_text: str) -> Union[str, None]:
+	"""Convert 'Wednesday, January 03, 2024' (or similar) to '2024-01-03'.
+
+	Matches the first '<Month> <day>, <year>' substring to be robust to leading weekday.
+	"""
+	m = re.search(r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s*(\d{4})", (date_text or ""), re.I)
+	if not m:
+		return None
+	month = _MONTH_TO_NUM[m.group(1).lower()]
+	day = int(m.group(2))
+	year = int(m.group(3))
+	return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def _normalize_time_to_24h(time_text: str) -> Union[str, None]:
+	"""Convert 'HH:MM AM/PM' to 24-hour 'HH:MM'. Returns None if pattern doesn't match."""
+	m = re.match(r"^(\d{1,2}):(\d{2})\s*(AM|PM)$", (time_text or "").strip(), re.I)
+	if not m:
+		return None
+	h = int(m.group(1))
+	mins = int(m.group(2))
+	ampm = m.group(3).upper()
+	if ampm == "AM":
+		if h == 12:
+			h = 0
+	else:
+		if h != 12:
+			h += 12
+	return f"{h:02d}:{mins:02d}"
 
 
