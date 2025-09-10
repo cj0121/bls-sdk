@@ -2,6 +2,7 @@ from typing import Iterable, List, Dict, Union
 import re
 import time
 
+from tqdm import tqdm
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.by import By
@@ -118,7 +119,7 @@ def scrape_archived_schedule(years: Iterable[int], output: str = "dataframe") ->
 		driver.get(_ARCHIVE_URL)
 		year_elems = driver.find_elements(By.PARTIAL_LINK_TEXT, "20") + driver.find_elements(By.PARTIAL_LINK_TEXT, "19")
 		text_to_href = {e.text.strip(): e.get_attribute("href") for e in year_elems if e.get_attribute("href")}
-		for y in years:
+		for y in tqdm(years):
 			y_int = int(y)
 			# Find a link that contains the year
 			candidate = None
@@ -126,17 +127,28 @@ def scrape_archived_schedule(years: Iterable[int], output: str = "dataframe") ->
 				if str(y_int) in k or str(y_int) in (v or ""):
 					candidate = v
 					break
-			if not candidate:
-				candidate = f"https://www.bls.gov/bls/schedule/archives/all_{y_int}_sched.htm"
-			# Open year page (prefer List View)
-			driver.get(candidate)
-			time.sleep(0.5)
-			links = driver.find_elements(By.LINK_TEXT, "List View")
-			if links:
-				links[0].click()
-				time.sleep(0.5)
-			# Extract table rows
-			record_rows = _extract_rows_with_selenium(driver)
+			# Build a list of candidate URLs to try
+			candidates: List[str] = []
+			if candidate:
+				candidates.append(candidate)
+			candidates.append(f"https://www.bls.gov/bls/schedule/archives/all_{y_int}_sched.htm")
+			candidates.append(f"https://www.bls.gov/schedule/{y_int}/home.htm")
+			record_rows: List[Dict[str, str]] = []
+			for url in candidates:
+				try:
+					driver.get(url)
+					time.sleep(0.5)
+					links = driver.find_elements(By.LINK_TEXT, "List View")
+					if links:
+						links[0].click()
+						time.sleep(0.5)
+					record_rows = _extract_rows_with_selenium(driver)
+					if record_rows:
+						break
+				except Exception:
+					continue
+			if not record_rows:
+				continue
 			for r in record_rows:
 				title, p_year, p_month, p_quarter, notes = _parse_release_text(r["release_raw"])
 				date_iso = _parse_date_iso(r["date_raw"]) or r["date_raw"].strip()

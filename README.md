@@ -19,6 +19,15 @@ Note: QCEW is NOT part of the BLS Public Data API v2. QCEW is distributed via se
 	- Token-bucket rate limiter (default: 5 rps; configurable)
 	- Typed exceptions: `HttpError`, `ApiError`, `ValidationError`
 
+### New: Archived Release Schedule Scraper (Selenium)
+
+- Scrapes `https://www.bls.gov/bls/archived_sched.htm` yearly List View pages
+- Returns a pandas DataFrame by default; optionally JSON
+- Extracts: `date` (YYYY-MM-DD), `time` (24h HH:MM), `release_title`, period fields, and notes
+  - `period_year`, `period_month` (1–12), `period_quarter` (1–4)
+  - `notes`: stripped tags like `Monthly`, `Annual`, `P`, `R`, or `Biennial`
+- Handles edge cases (e.g., titles with `(Monthly)`, period-only `for Biennial`, and a.m./p.m. variants)
+
 ## Install
 
 ```bash
@@ -82,6 +91,34 @@ series = ["CUUR0000SA0", "CEU0000000001"]
 result = pdc.get_many_series(series, startyear="2022", endyear="2023", annualaverage=False, calculations=True)
 print(len(result))
 ```
+
+### Scrape Archived Release Schedule
+
+```python
+from bls_sdk import scrape_archived_schedule
+
+# One year as DataFrame
+df_2024 = scrape_archived_schedule([2024])
+print(df_2024.head())
+
+# Multiple years combined and saved to CSV
+years = [2021, 2022, 2023, 2024]
+df = scrape_archived_schedule(years)
+df.to_csv('releases_2021_2024.csv', index=False)
+
+# As JSON
+records = scrape_archived_schedule([2023, 2024], output="json")
+```
+
+DataFrame columns:
+
+- `date` — normalized `YYYY-MM-DD`
+- `time` — normalized `HH:MM` (24-hour)
+- `release_title` — e.g., `Employment Situation`
+- `period_year`, `period_month`, `period_quarter`
+- `notes` — e.g., `Monthly`, `Annual`, `Biennial`, `P`, `R`
+- `source_year_page` — the year page parsed
+- `year_page_url` — final URL used (List View when available)
 
 ### Catalog metadata (titles)
 
