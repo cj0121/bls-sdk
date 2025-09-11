@@ -2,6 +2,7 @@ from typing import Iterable, List, Dict, Union
 import re
 import time
 
+from tqdm.auto import tqdm
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.by import By
@@ -108,7 +109,7 @@ def scrape_archived_schedule(years: Iterable[int], output: str = "dataframe") ->
 		driver.get(_ARCHIVE_URL)
 		year_elems = driver.find_elements(By.PARTIAL_LINK_TEXT, "20") + driver.find_elements(By.PARTIAL_LINK_TEXT, "19")
 		text_to_href = {e.text.strip(): e.get_attribute("href") for e in year_elems if e.get_attribute("href")}
-		for y in years:
+		for y in tqdm(years):
 			y_int = int(y)
 			if y_int < 2008:
 				# pre-2008 handled via manual scrapes; skip here

@@ -120,6 +120,9 @@ def parse_manual_schedule_txt(path: Union[str, Path], source_year: int, output: 
 					period_year = int(m_tail_y.group(1))
 					clean_title = clean_title[: m_tail_y.start()].rstrip(', ').strip()
 
+		# Normalize plural 'Indexes' to singular 'Index' for consistency
+		clean_title = re.sub(r"\bIndexes\b", "Index", clean_title, flags=re.I)
+
 		records.append({
 			"date": date_iso,
 			"time": time_part or "",
