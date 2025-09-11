@@ -18,13 +18,19 @@ _MONTH_TO_NUM = {
 }
 
 _TIME_RE = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)\b", re.I)
+_DATE_RE = re.compile(
+    r"(January|February|March|April|May|June|July|August|September|October|November|December|Jan\.?|Feb\.?|Mar\.?|Apr\.?|Jun\.?|Jul\.?|Aug\.?|Sep\.?|Sept\.?|Oct\.?|Nov\.?|Dec\.?)\s+(\d{1,2})(?:\s*,\s*(\d{4}))?(?!\d)",
+    re.I,
+)
 
 
 def _normalize_time_24h(text: str) -> Optional[str]:
 	text = (text or "").replace("\xa0", " ")
-	m = _TIME_RE.search(text)
-	if not m:
+	# Prefer the rightmost time occurrence in case of stray tokens earlier
+	match_list = list(_TIME_RE.finditer(text))
+	if not match_list:
 		return None
+	m = match_list[-1]
 	h = int(m.group(1))
 	mins = int(m.group(2) or 0)
 	ampm = m.group(3).lower()
@@ -67,7 +73,10 @@ def parse_manual_schedule_txt(path: Union[str, Path], source_year: int, output: 
 	records: List[Dict[str, Union[str, int, None]]] = []
 	for raw in lines:
 		raw = raw.replace("\xa0", " ")
-		if not raw.strip() or raw.strip().lower().startswith("release name"):
+		if not raw.strip():
+			continue
+		low = raw.strip().lower()
+		if low.startswith("release name") or low.startswith("schedule for ") or low.startswith("last modified date"):
 			continue
 		# Split by two or more spaces or tabs
 		parts = re.split(r"\s{2,}|\t+", raw.strip())
@@ -78,12 +87,21 @@ def parse_manual_schedule_txt(path: Union[str, Path], source_year: int, output: 
 		date_part = parts[1].strip()
 		# Always scan full line for time to avoid misses
 		time_part = _normalize_time_24h(raw) or ""
+		# Skip lines without a time (avoid footer/headers like 'Last Modified Date')
+		if not time_part:
+			continue
 
-		# Parse date like 'Jan.  5, 2007' or 'Jan.  5' (assume year from context)
-		m = re.search(r"(Jan\.?|Feb\.?|Mar\.?|Apr\.?|May|Jun\.?|Jul\.?|Aug\.?|Sep\.?|Sept\.?|Oct\.?|Nov\.?|Dec\.?)\s+(\d{1,2})(?:,\s*(\d{4}))?", date_part, re.I)
+		# Parse date with strong preference for separated tokens (Month in parts[1], Day[, Year] in parts[2])
+		m = None
+		if len(parts) >= 3:
+			candidate = f"{parts[1]} {parts[2]}".strip()
+			m = _DATE_RE.search(candidate)
+		if not m and len(parts) >= 4:
+			candidate = f"{parts[1]} {parts[2]} {parts[3]}".strip()
+			m = _DATE_RE.search(candidate)
 		if not m:
-			# Try to find elsewhere on the line
-			m = re.search(r"(Jan\.?|Feb\.?|Mar\.?|Apr\.?|May|Jun\.?|Jul\.?|Aug\.?|Sep\.?|Sept\.?|Oct\.?|Nov\.?|Dec\.?)\s+(\d{1,2})(?:,\s*(\d{4}))?", raw, re.I)
+			# Fallback: scan entire line but avoid false match on '<Month> 2007' (no day)
+			m = next((_m for _m in _DATE_RE.finditer(raw)), None)
 		if not m:
 			continue
 		month = _MONTH_TO_NUM[m.group(1).lower()]
