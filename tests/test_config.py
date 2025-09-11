@@ -9,7 +9,6 @@ def test_version_present():
 def test_config_defaults():
 	assert config.PUBLIC_API_BASE.startswith("https://")
 	assert config.PUBLIC_API_TS_DATA_ENDPOINT.endswith("/timeseries/data")
-	assert config.QCEW_API_BASE.startswith("https://")
 	assert config.REQUEST_TIMEOUT_SECONDS > 0
 	assert config.MAX_RETRIES >= 1
 	assert config.BACKOFF_INITIAL_SECONDS > 0

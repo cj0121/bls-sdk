@@ -11,7 +11,6 @@ PUBLIC_API_LATEST_ENDPOINT = f"{PUBLIC_API_BASE}/timeseries/latest"
 PUBLIC_API_POPULAR_ENDPOINT = f"{PUBLIC_API_BASE}/timeseries/popular"
 PUBLIC_API_SURVEYS_ENDPOINT = f"{PUBLIC_API_BASE}/surveys"
 
-QCEW_API_BASE = os.getenv("BLS_QCEW_API_BASE", "https://data.bls.gov/cew/data/api")
 
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("BLS_REQUEST_TIMEOUT_SECONDS", "30"))
 MAX_RETRIES = int(os.getenv("BLS_MAX_RETRIES", "3"))

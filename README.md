@@ -5,7 +5,7 @@ A friendly Python wrapper for the BLS Public Data API v2 (time series).
 - Public Data API v2: time series across CPI, CES, JOLTS, LAUS, Productivity, etc.
 - Built-in retries, client-side rate limiting, and clear error types.
 
-Note: QCEW is NOT part of the BLS Public Data API v2. QCEW is distributed via separate Open Data CSV/ZIP files and is not covered by this client.
+Note: QCEW is distributed via separate Open Data CSV/ZIP files and is not covered by this client.
 
 ## Features
 
@@ -34,6 +34,8 @@ Note: QCEW is NOT part of the BLS Public Data API v2. QCEW is distributed via se
 python -m pip install -r requirements.txt
 python -m pip install -e .
 ```
+
+Requires Google Chrome installed. Selenium Manager will automatically fetch a matching ChromeDriver.
 
 ## Configure
 
@@ -119,6 +121,41 @@ DataFrame columns:
 - `notes` — e.g., `Monthly`, `Annual`, `Biennial`, `P`, `R`
 - `source_year_page` — the year page parsed
 - `year_page_url` — final URL used (List View when available)
+
+### Manual (pre-2008) schedules
+
+The Selenium scraper intentionally skips years prior to 2008 (older pages differ and are often blocked). For those years, copy the schedule text files locally (e.g., `data/manual_scrapes/2007.txt`) and parse with the manual converter.
+
+```python
+from bls_sdk import parse_manual_schedule_txt, parse_manual_batch
+
+# Parse a single year text file (returns DataFrame by default)
+df_2007 = parse_manual_schedule_txt('data/manual_scrapes/2007.txt', 2007)
+
+# Batch-parse multiple years from a directory (default: data/manual_scrapes)
+df_pre = parse_manual_batch([2006, 2007])
+
+# Or get JSON records
+recs_2006 = parse_manual_schedule_txt('data/manual_scrapes/2006.txt', 2006, output='json')
+```
+
+Manual parsing returns the same schema as the Selenium scraper. For manual rows, `year_page_url` is `None`.
+
+### Combine manual and live scraped schedules
+
+```python
+from bls_sdk import scrape_archived_schedule, parse_manual_batch
+import pandas as pd
+
+# Pre-2008 via manual files
+pre_df = parse_manual_batch([2006, 2007])
+
+# 2008+ via Selenium
+post_df = scrape_archived_schedule([2021, 2022, 2023, 2024])
+
+combined = pd.concat([pre_df, post_df], ignore_index=True)
+combined.to_csv('bls_release_calendar.csv', index=False)
+```
 
 ### Catalog metadata (titles)
 

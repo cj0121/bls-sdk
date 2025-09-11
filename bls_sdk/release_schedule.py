@@ -2,7 +2,6 @@ from typing import Iterable, List, Dict, Union
 import re
 import time
 
-from tqdm import tqdm
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.by import By
@@ -44,16 +43,6 @@ def _new_driver(headless: bool = True) -> webdriver.Chrome:
 	opts.add_argument("--no-sandbox")
 	opts.add_argument("--disable-dev-shm-usage")
 	return webdriver.Chrome(options=opts)
-
-
-def _scrape_year_page_html(driver: webdriver.Chrome, year_url: str) -> str:
-	driver.get(year_url)
-	# Prefer List View if present
-	links = driver.find_elements(By.LINK_TEXT, "List View")
-	if links:
-		links[0].click()
-		time.sleep(0.5)
-	return driver.page_source
 
 
 def _extract_rows_with_selenium(driver: webdriver.Chrome) -> List[Dict[str, str]]:
@@ -119,7 +108,7 @@ def scrape_archived_schedule(years: Iterable[int], output: str = "dataframe") ->
 		driver.get(_ARCHIVE_URL)
 		year_elems = driver.find_elements(By.PARTIAL_LINK_TEXT, "20") + driver.find_elements(By.PARTIAL_LINK_TEXT, "19")
 		text_to_href = {e.text.strip(): e.get_attribute("href") for e in year_elems if e.get_attribute("href")}
-		for y in tqdm(years):
+		for y in years:
 			y_int = int(y)
 			if y_int < 2008:
 				# pre-2008 handled via manual scrapes; skip here
