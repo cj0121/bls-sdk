@@ -121,6 +121,9 @@ def scrape_archived_schedule(years: Iterable[int], output: str = "dataframe") ->
 		text_to_href = {e.text.strip(): e.get_attribute("href") for e in year_elems if e.get_attribute("href")}
 		for y in tqdm(years):
 			y_int = int(y)
+			if y_int < 2008:
+				# pre-2008 handled via manual scrapes; skip here
+				continue
 			# Find a link that contains the year
 			candidate = None
 			for k, v in text_to_href.items():
@@ -137,11 +140,15 @@ def scrape_archived_schedule(years: Iterable[int], output: str = "dataframe") ->
 			for url in candidates:
 				try:
 					driver.get(url)
-					time.sleep(0.5)
+					time.sleep(0.8)
+					# Simulate minimal human behavior
+					driver.execute_script("window.scrollTo(0, Math.max(document.body.scrollHeight*0.2, 400));")
+					time.sleep(0.4)
+					driver.execute_script("window.scrollTo(0, 0);")
 					links = driver.find_elements(By.LINK_TEXT, "List View")
 					if links:
 						links[0].click()
-						time.sleep(0.5)
+						time.sleep(0.6)
 					record_rows = _extract_rows_with_selenium(driver)
 					if record_rows:
 						break
