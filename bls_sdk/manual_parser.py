@@ -62,7 +62,36 @@ def _strip_notes(title: str) -> (str, Optional[str]):
 	return title[: m.start()].strip(), notes
 
 
-def parse_manual_schedule_txt(path: Union[str, Path], source_year: int, output: str = "dataframe") -> Union[List[Dict[str, Union[str, int, None]]], "pd.DataFrame"]:
+def _filter_cross_year_records(records: List[Dict[str, Union[str, int, None]]]) -> List[Dict[str, Union[str, int, None]]]:
+	"""Keep only rows where year(date) == source_year_page and drop duplicates.
+
+	This mirrors the reference filtering that removes the first releases of the
+	next year when they appear at the bottom of the prior year's manual page.
+	Duplicates are identified on (date, release_title).
+	"""
+	filtered: List[Dict[str, Union[str, int, None]]] = []
+	seen = set()
+	for r in records:
+		date_str = r.get("date")  # type: ignore[assignment]
+		source_year = r.get("source_year_page")  # type: ignore[assignment]
+		if not date_str or source_year is None:
+			continue
+		try:
+			date_year = int(str(date_str)[:4])
+			page_year = int(str(source_year))
+		except Exception:
+			continue
+		if date_year != page_year:
+			continue
+		key = (str(date_str), str(r.get("release_title")))
+		if key in seen:
+			continue
+		seen.add(key)
+		filtered.append(r)
+	return filtered
+
+
+def parse_manual_schedule_txt(path: Union[str, Path], source_year: int, output: str = "dataframe") -> Union[List[Dict[str, Union[str, int, None]]], object]:
 	"""Parse a manually saved schedule text file into release_schedule format.
 
 	Expected line shape: '<Release Title>\t<Month> <day>[, <year>]\t<time>'
@@ -71,6 +100,10 @@ def parse_manual_schedule_txt(path: Union[str, Path], source_year: int, output: 
 	path = Path(path)
 	lines = [ln.rstrip("\n") for ln in path.read_text(encoding="utf-8").splitlines()]
 	records: List[Dict[str, Union[str, int, None]]] = []
+	# Some BLS pages append a block of next-year January/February releases at the end.
+	# Detect entry into that block when we first see an explicit Jan/Feb date labeled
+	# with source_year+1, and from then on infer missing years on Jan/Feb rows as +1.
+	cross_year_active = False
 	for raw in lines:
 		raw = raw.replace("\xa0", " ")
 		if not raw.strip():
@@ -106,7 +139,17 @@ def parse_manual_schedule_txt(path: Union[str, Path], source_year: int, output: 
 			continue
 		month = _MONTH_TO_NUM[m.group(1).lower()]
 		day = int(m.group(2))
-		year = int(m.group(3) or source_year)
+		captured_year = m.group(3)
+		if captured_year is not None:
+			year = int(captured_year)
+			# Toggle cross-year mode when we encounter explicit Jan/Feb of next year
+			if (month in (1, 2)) and year == (source_year + 1):
+				cross_year_active = True
+		else:
+			# No explicit year printed; infer from position/context
+			year = source_year
+			if (month in (1, 2)) and cross_year_active:
+				year = source_year + 1
 		date_iso = f"{year:04d}-{month:02d}-{day:02d}"
 
 		clean_title, notes = _strip_notes(title)
@@ -153,11 +196,14 @@ def parse_manual_schedule_txt(path: Union[str, Path], source_year: int, output: 
 			"year_page_url": None,
 		})
 
+	# Remove rows whose release year doesn't match the page year; also de-dupe
+	records = _filter_cross_year_records(records)
+
 	if output == "json":
 		return records
 	# Default to DataFrame
 	import pandas as pd  # type: ignore
-	return pd.DataFrame.from_records(records, columns=[
+	df = pd.DataFrame.from_records(records, columns=[
 		"date",
 		"time",
 		"release_title",
@@ -168,9 +214,13 @@ def parse_manual_schedule_txt(path: Union[str, Path], source_year: int, output: 
 		"source_year_page",
 		"year_page_url",
 	])
+	# Ensure strict de-duplication on (date, release_title)
+	if not df.empty:
+		df = df.drop_duplicates(subset=["date", "release_title"], keep="first").reset_index(drop=True)
+	return df
 
 
-def parse_manual_batch(years: Iterable[int], directory: Union[str, Path] = "data/manual_scrapes", output: str = "dataframe") -> Union[List[Dict[str, Union[str, int, None]]], "pd.DataFrame"]:
+def parse_manual_batch(years: Iterable[int], directory: Union[str, Path] = "data/manual_scrapes", output: str = "dataframe") -> Union[List[Dict[str, Union[str, int, None]]], object]:
 	"""Parse multiple manual schedule text files (one per year) and combine.
 
 	Parameters:
@@ -190,10 +240,12 @@ def parse_manual_batch(years: Iterable[int], directory: Union[str, Path] = "data
 		# ensure list
 		all_records.extend(records_or_df)  # type: ignore[arg-type]
 
+	# Apply cross-year filter and global de-duplication across combined years
+	all_records = _filter_cross_year_records(all_records)
 	if output == "json":
 		return all_records
 	import pandas as pd  # type: ignore
-	return pd.DataFrame.from_records(all_records, columns=[
+	df = pd.DataFrame.from_records(all_records, columns=[
 		"date",
 		"time",
 		"release_title",
@@ -204,5 +256,8 @@ def parse_manual_batch(years: Iterable[int], directory: Union[str, Path] = "data
 		"source_year_page",
 		"year_page_url",
 	])
+	if not df.empty:
+		df = df.drop_duplicates(subset=["date", "release_title"], keep="first").reset_index(drop=True)
+	return df
 
 

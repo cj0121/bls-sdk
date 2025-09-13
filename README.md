@@ -141,6 +141,36 @@ recs_2006 = parse_manual_schedule_txt('data/manual_scrapes/2006.txt', 2006, outp
 
 Manual parsing returns the same schema as the Selenium scraper. For manual rows, `year_page_url` is `None`.
 
+#### Cross‑year block handling and de‑duplication
+
+Some BLS manual pages append the first releases of the next year (often January/February) to the end of the prior year's page. The manual parser handles this by:
+
+- Inferring missing years for those trailing Jan/Feb rows once an explicit next‑year date is encountered.
+- Filtering out any rows where `year(date) != source_year_page`.
+- Dropping duplicates on `(date, release_title)` both per file and when combining multiple years.
+
+Quick check:
+
+```python
+from bls_sdk import parse_manual_schedule_txt, parse_manual_batch
+import pandas as pd
+
+df_2003 = parse_manual_schedule_txt('data/manual_scrapes/2003.txt', 2003)
+assert not any(pd.to_datetime(df_2003['date']).dt.year == 2004)  # cross-year rows removed
+
+combined = parse_manual_batch([2003, 2004])
+dups = combined.duplicated(subset=['date','release_title'], keep=False)
+assert dups.sum() == 0  # de-dup across years
+```
+
+Additional normalizations in the manual parser:
+
+- Extracts period info from titles into `period_year`, `period_month`, `period_quarter` (e.g., “Fourth Quarter 2006”, “December 2006”).
+- Strips parenthetical notes into `notes` without parentheses (e.g., `Monthly`, `Annual`, `P`, `R`).
+- Normalizes time strings to 24h `HH:MM`.
+- Removes leading "The " from `Employment Situation`.
+- Normalizes "Indexes" → "Index" in `release_title`.
+
 ### Combine manual and live scraped schedules
 
 ```python
